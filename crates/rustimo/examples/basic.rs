@@ -1,0 +1,48 @@
+use rustimo::{Ui, View, cell, display, notebook, serve};
+
+#[cell]
+fn data() -> Vec<u32> {
+    let values = vec![10, 20, 30, 40];
+    display(View::text(format!("Вхідні дані: {values:?}")));
+    values
+}
+
+#[cell]
+fn limit() -> Ui<u32> {
+    Ui::slider("limit", 0, 40, 15)
+        .step(5)
+        .label("Мінімальне значення")
+}
+
+#[allow(clippy::ptr_arg)] // The reference must match the producer's concrete stored type.
+#[cell]
+fn filtered(data: &Vec<u32>, limit: &Ui<u32>) -> Vec<u32> {
+    let values: Vec<u32> = data
+        .iter()
+        .copied()
+        .filter(|value| *value >= limit.value())
+        .collect();
+    display(View::text(format!("Відфільтровані значення: {values:?}")));
+    values
+}
+
+#[allow(clippy::ptr_arg)]
+#[cell]
+fn count(filtered: &Vec<u32>) -> usize {
+    let count = filtered.len();
+    display(View::text(format!("Кількість: {count}")));
+    count
+}
+
+#[cell]
+fn independent() -> &'static str {
+    display(View::text("Ця клітинка не залежить від слайдера."));
+    "independent"
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut app = notebook!(data, limit, filtered, count, independent)?;
+    app.run_all()?;
+    serve(app, "127.0.0.1:3001")?;
+    Ok(())
+}

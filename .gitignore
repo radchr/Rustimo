@@ -1,0 +1,26 @@
+# Local credentials and environment overrides
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+
+# Rust build output
+target/
+**/target/
+
+# Editor and OS files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Local logs and scratch files
+*.log
+*.tmp
+*.bak

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rustimo — reactive Rust notebook</title>
+  <style>
+    :root { font: 16px system-ui, sans-serif; color-scheme: dark; background: #0d1220; color: #e8edf7; }
+    body { max-width: 850px; margin: 32px auto; padding: 0 20px; }
+    h1 { margin-bottom: 4px; }
+    .note { color: #a8b6d1; margin-top: 0; }
+    .cell { border: 1px solid #34425c; border-radius: 12px; background: #182239; padding: 18px; margin: 15px 0; }
+    .top { display: flex; justify-content: space-between; color: #a8b6d1; }
+    .name { font-weight: 700; color: #e8edf7; }
+    .view { white-space: pre-wrap; margin-top: 15px; }
+    input[type=range] { width: 100%; accent-color: #f78b45; }
+    .error { color: #ff8d8d; }
+    #message { min-height: 1.5em; color: #ff8d8d; }
+  </style>
+</head>
+<body>
+  <h1>🦀 Rustimo</h1>
+  <p class="note">Реактивний блокнот Rust. Віджет змінює тільки залежні клітинки.</p>
+  <div id="message" role="alert"></div>
+  <main id="cells"></main>
+  <script>
+    const cells = document.getElementById('cells');
+    const message = document.getElementById('message');
+    const pending = new Map();
+    let requestVersion = 0;
+    let requestQueue = Promise.resolve();
+
+    function render(state) {
+      cells.replaceChildren();
+      for (const cell of state.cells) {
+        const card = document.createElement('section');
+        card.className = 'cell';
+        const top = document.createElement('div');
+        top.className = 'top';
+        const name = document.createElement('span');
+        name.className = 'name';
+        name.textContent = cell.name;
+        const status = document.createElement('span');
+        status.textContent = `${cell.status} · запусків: ${cell.run_count} · ${cell.execution_time_us} µs`;
+        top.append(name, status);
+        card.append(top);
+
+        if (cell.view.kind === 'widget' && cell.view.value.kind === 'slider') {
+          const widget = cell.view.value;
+          const label = document.createElement('label');
+          label.textContent = `${widget.label || widget.name}: ${widget.value}`;
+          const slider = document.createElement('input');
+          slider.type = 'range';
+          slider.min = widget.min;
+          slider.max = widget.max;
+          slider.step = widget.step || 1;
+          slider.value = widget.value;
+          slider.addEventListener('input', () => {
+            label.textContent = `${widget.label || widget.name}: ${slider.value}`;
+            clearTimeout(pending.get(widget.name));
+            pending.set(widget.name, setTimeout(() => updateSignal(widget.name, Number(slider.value)), 60));
+          });
+          card.append(label, slider);
+        } else if (cell.view.kind === 'text') {
+          const view = document.createElement('div');
+          view.className = 'view';
+          view.textContent = cell.view.value;
+          card.append(view);
+        }
+
+        if (cell.error) {
+          const error = document.createElement('div');
+          error.className = 'error';
+          error.textContent = cell.error.message;
+          card.append(error);
+        }
+        cells.append(card);
+      }
+    }
+
+    function updateSignal(name, value) {
+      const version = ++requestVersion;
+      requestQueue = requestQueue.then(async () => {
+        try {
+          const response = await fetch('/api/signal', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, value })
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.message);
+          if (version === requestVersion) {
+            message.textContent = '';
+            render(result);
+          }
+        } catch (error) {
+          if (version === requestVersion) message.textContent = error.message;
+        }
+      });
+    }
+
+    fetch('/api/state')
+      .then(response => response.json())
+      .then(render)
+      .catch(error => { message.textContent = error.message; });
+  </script>
+</body>
+</html>
