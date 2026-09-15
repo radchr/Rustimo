@@ -126,6 +126,7 @@
     let requestQueue = Promise.resolve();
     let requestVersion = 0;
     let fileDraft = false;
+    let buildPoll = null;
 
     function node(tag, className, text) {
       const element = document.createElement(tag);
@@ -161,10 +162,11 @@
 
     function showBuildStatus(state) {
       const status = state.source_status || 'current';
-      const label = status === 'current' ? 'Збірка актуальна' : status === 'building' ? 'Збираю ноутбук…' : 'Код збережено; output попередньої збірки';
+      const label = status === 'current' ? 'Збірка актуальна' : status === 'building' ? `Збираю редакцію ${state.source_revision}; віджети працюють на попередній збірці` : 'Код збережено; output попередньої збірки';
       document.getElementById('status-line').dataset.status = status;
       document.getElementById('build-status').textContent = label;
       document.getElementById('cell-count').textContent = `· ${state.cells.length} клітинок`;
+      document.getElementById('run-all').disabled = status === 'building';
       const errors = state.diagnostics || [];
       diagnostics.textContent = errors.map(error => `${error.file || 'Cargo'}${error.line ? ':' + error.line : ''}: ${error.message}`).join('\n');
       if (errors.length && status === 'stale') {
@@ -211,6 +213,7 @@
         const actions = node('div', 'cell-actions');
         const run = node('button', '', '▶ Запустити');
         run.type = 'button';
+        run.disabled = state.source_status === 'building';
         run.addEventListener('click', () => source ? saveCell(cell.name) : runCell(cell.name));
         actions.append(run);
         head.append(actions);
@@ -255,6 +258,31 @@
       }
       renderGraph(state);
       restoreFocus(focus);
+      watchBuild(state);
+    }
+
+    function watchBuild(state) {
+      clearTimeout(buildPoll);
+      if (state.source_status !== 'building') return;
+      buildPoll = setTimeout(async () => {
+        try {
+          await requestQueue;
+          const response = await fetch('/api/state');
+          if (!response.ok) throw new Error('Не вдалося отримати стан збірки');
+          const next = await response.json();
+          if (next.source_revision >= (currentState?.source_revision ?? 0)
+              && next.worker_generation >= (currentState?.worker_generation ?? 0)) {
+            if (next.source_status === 'building'
+                && next.source_revision === currentState?.source_revision
+                && next.worker_generation === currentState?.worker_generation) {
+              watchBuild(next);
+            } else render(next);
+          }
+        } catch (error) {
+          message.textContent = error.message;
+          watchBuild(currentState);
+        }
+      }, 600);
     }
 
     function widgetView(widget) {
@@ -354,7 +382,7 @@
         if (result.state.source_status === 'current') message.textContent = '';
         if (!sourceCells.length) filePanel.open = true;
       } catch (error) { message.textContent = error.message; }
-      finally { document.getElementById('run-all').disabled = false; }
+      finally { document.getElementById('run-all').disabled = currentState?.source_status === 'building'; }
     }
 
     async function saveFile() {

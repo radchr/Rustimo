@@ -54,6 +54,15 @@ struct Editor {
     worker: Option<Worker>,
     source_status: &'static str,
     diagnostics: Vec<BuildDiagnostic>,
+    source_revision: u64,
+    worker_generation: u64,
+    build_gate: Arc<Mutex<()>>,
+}
+
+#[derive(Clone)]
+struct BuildPlan {
+    workspace: PathBuf,
+    example: String,
 }
 
 impl Drop for Editor {
@@ -103,6 +112,9 @@ pub fn serve_edit(source_file: impl AsRef<Path>, addr: &str) -> io::Result<()> {
         worker: None,
         source_status: "building",
         diagnostics: Vec::new(),
+        source_revision: 0,
+        worker_generation: 0,
+        build_gate: Arc::new(Mutex::new(())),
     };
     editor.rebuild()?;
     if editor.worker.is_none() {
@@ -156,6 +168,8 @@ fn handle(mut stream: TcpStream, editor: &Arc<Mutex<Editor>>, host: &str) -> io:
                 "filename": editor.source_file.file_name().and_then(|name| name.to_str()),
                 "source_status": editor.source_status,
                 "diagnostics": editor.diagnostics,
+                "source_revision": editor.source_revision,
+                "worker_generation": editor.worker_generation,
             });
             send_json(&mut stream, "200 OK", &json)
         }
@@ -199,6 +213,7 @@ fn handle(mut stream: TcpStream, editor: &Arc<Mutex<Editor>>, host: &str) -> io:
                     );
                 }
             };
+            let shared = Arc::clone(editor);
             let mut editor = editor.lock().unwrap_or_else(|e| e.into_inner());
             let current = fs::read_to_string(&editor.source_file)?;
             if current != request.base_source {
@@ -212,7 +227,13 @@ fn handle(mut stream: TcpStream, editor: &Arc<Mutex<Editor>>, host: &str) -> io:
                 fs::write(&editor.source_file, &request.source)?;
                 editor.source_status = "building";
                 editor.diagnostics.clear();
-                editor.rebuild()?;
+                editor.source_revision += 1;
+                schedule_rebuild(
+                    shared,
+                    editor.plan(),
+                    editor.source_revision,
+                    Arc::clone(&editor.build_gate),
+                );
             }
             let state = editor.state()?;
             let json = serde_json::json!({
@@ -220,6 +241,8 @@ fn handle(mut stream: TcpStream, editor: &Arc<Mutex<Editor>>, host: &str) -> io:
                 "cells": parse_cells(&request.source).unwrap_or_default(),
                 "source_status": editor.source_status,
                 "diagnostics": editor.diagnostics,
+                "source_revision": editor.source_revision,
+                "worker_generation": editor.worker_generation,
                 "state": state,
             });
             send_json(&mut stream, "200 OK", &json)
@@ -235,6 +258,7 @@ fn handle(mut stream: TcpStream, editor: &Arc<Mutex<Editor>>, host: &str) -> io:
                     );
                 }
             };
+            let shared = Arc::clone(editor);
             let mut editor = editor.lock().unwrap_or_else(|e| e.into_inner());
             let current = fs::read_to_string(&editor.source_file)?;
             if current != request.base_source {
@@ -258,7 +282,13 @@ fn handle(mut stream: TcpStream, editor: &Arc<Mutex<Editor>>, host: &str) -> io:
                 fs::write(&editor.source_file, &updated)?;
                 editor.source_status = "building";
                 editor.diagnostics.clear();
-                editor.rebuild()?;
+                editor.source_revision += 1;
+                schedule_rebuild(
+                    shared,
+                    editor.plan(),
+                    editor.source_revision,
+                    Arc::clone(&editor.build_gate),
+                );
             }
             let state = editor.state()?;
             let json = serde_json::json!({
@@ -266,6 +296,8 @@ fn handle(mut stream: TcpStream, editor: &Arc<Mutex<Editor>>, host: &str) -> io:
                 "cells": parse_cells(&updated).unwrap_or_default(),
                 "source_status": editor.source_status,
                 "diagnostics": editor.diagnostics,
+                "source_revision": editor.source_revision,
+                "worker_generation": editor.worker_generation,
                 "state": state,
             });
             send_json(&mut stream, "200 OK", &json)
@@ -293,7 +325,9 @@ impl Editor {
     fn decorate_state(&self, state: &mut serde_json::Value) {
         state["source_status"] = serde_json::json!(self.source_status);
         state["diagnostics"] = serde_json::json!(self.diagnostics);
-        if self.source_status == "stale"
+        state["source_revision"] = serde_json::json!(self.source_revision);
+        state["worker_generation"] = serde_json::json!(self.worker_generation);
+        if self.source_status != "current"
             && let Some(cells) = state
                 .get_mut("cells")
                 .and_then(serde_json::Value::as_array_mut)
@@ -307,19 +341,8 @@ impl Editor {
     }
 
     fn rebuild(&mut self) -> io::Result<()> {
-        let output = Command::new("cargo")
-            .arg("build")
-            .arg("--manifest-path")
-            .arg(self.workspace.join("Cargo.toml"))
-            .args([
-                "-p",
-                "rustimo",
-                "--example",
-                &self.example,
-                "--message-format=json",
-            ])
-            .current_dir(&self.workspace)
-            .output()?;
+        let plan = self.plan();
+        let output = plan.build()?;
         self.diagnostics = parse_diagnostics(&output.stdout);
         if !output.status.success() {
             if self.diagnostics.is_empty() {
@@ -337,7 +360,7 @@ impl Editor {
                 .ok()
                 .map(|(_, value)| value)
         });
-        let worker = match self.start_worker() {
+        let worker = match plan.start_worker() {
             Ok(worker) => worker,
             Err(error) => {
                 self.diagnostics.push(BuildDiagnostic {
@@ -357,7 +380,33 @@ impl Editor {
         }
         self.diagnostics.clear();
         self.source_status = "current";
+        self.worker_generation += 1;
         Ok(())
+    }
+
+    fn plan(&self) -> BuildPlan {
+        BuildPlan {
+            workspace: self.workspace.clone(),
+            example: self.example.clone(),
+        }
+    }
+}
+
+impl BuildPlan {
+    fn build(&self) -> io::Result<std::process::Output> {
+        Command::new("cargo")
+            .arg("build")
+            .arg("--manifest-path")
+            .arg(self.workspace.join("Cargo.toml"))
+            .args([
+                "-p",
+                "rustimo",
+                "--example",
+                &self.example,
+                "--message-format=json",
+            ])
+            .current_dir(&self.workspace)
+            .output()
     }
 
     fn start_worker(&self) -> io::Result<Worker> {
@@ -428,6 +477,86 @@ impl Editor {
             io::ErrorKind::TimedOut,
             "new notebook worker did not become ready",
         ))
+    }
+}
+
+fn schedule_rebuild(
+    editor: Arc<Mutex<Editor>>,
+    plan: BuildPlan,
+    revision: u64,
+    build_gate: Arc<Mutex<()>>,
+) {
+    std::thread::spawn(move || {
+        let _gate = build_gate.lock().unwrap_or_else(|e| e.into_inner());
+        if editor
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .source_revision
+            != revision
+        {
+            return;
+        }
+        let result = plan.build();
+        let mut host = editor.lock().unwrap_or_else(|e| e.into_inner());
+        if host.source_revision != revision {
+            return;
+        }
+        let output = match result {
+            Ok(output) => output,
+            Err(error) => {
+                host.build_failed(error.to_string(), Vec::new());
+                return;
+            }
+        };
+        let diagnostics = parse_diagnostics(&output.stdout);
+        if !output.status.success() {
+            host.build_failed(
+                String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+                diagnostics,
+            );
+            return;
+        }
+        drop(host);
+        let new_worker = plan.start_worker();
+        let mut host = editor.lock().unwrap_or_else(|e| e.into_inner());
+        if host.source_revision != revision {
+            if let Ok(worker) = new_worker {
+                worker.stop();
+            }
+            return;
+        }
+        let worker = match new_worker {
+            Ok(worker) => worker,
+            Err(error) => {
+                host.build_failed(error.to_string(), Vec::new());
+                return;
+            }
+        };
+        if let Some(previous) = host.worker.as_ref()
+            && let Ok((_, old_state)) = worker_request(&previous.addr, "GET", "/api/state", &[])
+        {
+            replay_signals(&old_state, &worker.addr);
+        }
+        if let Some(previous) = host.worker.replace(worker) {
+            previous.stop();
+        }
+        host.diagnostics.clear();
+        host.source_status = "current";
+        host.worker_generation += 1;
+    });
+}
+
+impl Editor {
+    fn build_failed(&mut self, fallback: String, mut diagnostics: Vec<BuildDiagnostic>) {
+        if diagnostics.is_empty() {
+            diagnostics.push(BuildDiagnostic {
+                message: fallback,
+                file: None,
+                line: None,
+            });
+        }
+        self.diagnostics = diagnostics;
+        self.source_status = "stale";
     }
 }
 

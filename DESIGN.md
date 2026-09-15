@@ -51,8 +51,12 @@ the example with Cargo, copies the executable to a unique worker path, checks
 the new worker's HTTP state, replays compatible widget values, and swaps it in.
 The previous worker remains available if compilation or startup fails; its
 outputs are marked stale. The worker boundary also contains aborts and native
-crashes from user code. The host currently serializes source rebuilds and UI
-requests behind one mutex, so interactions wait while Cargo is running.
+crashes from user code. Cargo builds now run outside the host state mutex, so
+the previous worker continues to handle UI signals. A build gate serializes
+jobs; revision checks before and after compilation/startup prevent superseded
+jobs from replacing a newer worker. The host lock is held briefly when the
+worker is swapped and widget values are replayed. The browser polls build
+status every 600 ms while a revision is compiling.
 If the initial build fails, the host serves the source and diagnostics without
 a worker so the notebook can be fixed in the browser.
 
@@ -78,7 +82,7 @@ declared input types. Browser views are serialized separately from large values.
 
 1. **Reactive app slice — implemented.** Typed cells, graph checks, vault,
    slider/text/checkbox widgets, output views, local HTTP app, and tests for targeted invalidation.
-2. **Local editor and build supervisor — implemented for examples.**
+2. **Local editor and asynchronous build supervisor — implemented for examples.**
    `rustimo edit crates/rustimo/examples/basic.rs`, source saving, Cargo JSON
    diagnostics with source locations, a separate worker, and successful-build
    swaps. Each new worker currently runs all cells before it is ready.
@@ -90,12 +94,15 @@ declared input types. Browser views are serialized separately from large values.
 5. **Portable source.** Support one `.rs` file through a CLI-generated Cargo
    project while keeping the source valid Rust and stable-toolchain compatible.
 
-The next slice should make Cargo builds asynchronous to keep UI interactions
-responsive, preserve unaffected outputs when source changes, support stable
+The next slice should add evented per-cell progress, preserve unaffected outputs
+when source changes, support stable
 cell IDs across edits, and handle notebooks outside the built-in examples
 directory. The current acceptance scenario was checked with a copied example:
 a successful edit changed an output; a compiler error left the old worker and
 slider usable with stale outputs; a successful fix replayed the slider value.
+An asynchronous acceptance run also checked two rapid source revisions: the
+first build was superseded, a failed build kept the worker generation unchanged,
+and saving a fix replayed the latest slider value.
 
 The [Pluto architecture comparison](PLUTO_ARCHITECTURE.md) separates mechanisms
 that can be adapted directly from Julia-specific evaluation behavior and gives

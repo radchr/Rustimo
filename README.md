@@ -18,10 +18,14 @@ the whole notebook. **Режим застосунку** hides the code and devel
 The dependency graph links back to cells. Expand the full-file editor at the
 bottom to change imports, types, or registration outside cells.
 
-Saving changed code invokes Cargo. Diagnostics appear above the cells and beside
+Saving changed code starts a background Cargo build and immediately marks the
+previous worker's outputs stale. Widgets keep responding while the build runs;
+the editor polls for completion. Diagnostics appear above the cells and beside
 the full source. A successful build starts a new notebook worker; a failed build
 keeps the last working notebook available and marks its outputs stale. Compatible
 slider, text, and checkbox values are replayed into a successful new worker.
+Source revisions and worker generations prevent an older build from replacing
+a newer saved revision.
 If the initial source does not compile, the editor still opens so you can fix it.
 
 Moving the slider reruns `filtered`, `count`, and `report` without a Cargo build;

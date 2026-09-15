@@ -14,7 +14,7 @@ with the current Rustimo prototype and defines the next implementation slices.
 | Rewriting a definition removes the old global; duplicate definitions are rejected. | [Reactivity](https://plutojl.org/en/docs/reactivity/) | A new Rustimo worker drops old values after a successful build, and duplicate cell names are errors. A failed build keeps the old worker but explicitly marks its outputs stale. |
 | The displayed cell order can differ from topological execution order. | [Moving cells](https://plutojl.org/en/docs/moving-cells/) | Already true: source order drives display and the DAG drives execution. |
 | Notebook files carry stable cell markers and package environment data. | [Notebook file](https://plutojl.org/en/docs/export-julia/), [package management](https://plutojl.org/en/docs/packages/) | `.rs` source is valid Rust, but function name currently doubles as cell identity; portable notebook packaging is still limited to Cargo examples. |
-| Browser and server synchronize cell code, output, order, logs and progress through a shared state with patches. | [Architecture](https://plutojl.org/en/docs/architecture/), [public API](https://plutojl.org/en/docs/api/) | Rustimo currently sends full JSON snapshots after HTTP actions. Builds hold the host mutex and have no live progress stream. |
+| Browser and server synchronize cell code, output, order, logs and progress through a shared state with patches. | [Architecture](https://plutojl.org/en/docs/architecture/), [public API](https://plutojl.org/en/docs/api/) | Rustimo currently sends full JSON snapshots after HTTP actions. Builds run off the host mutex; the browser polls revisioned build state, but has no per-cell progress stream. |
 | User code runs in a separate process per notebook; disabled cells also disable dependents. | [Architecture](https://plutojl.org/en/docs/architecture/), [disabled cells](https://plutojl.org/en/docs/disable-cell/) | Separate worker exists. Runtime errors block descendants, but there is no explicit disable action yet. |
 
 ## Language boundary
@@ -94,10 +94,10 @@ small Cargo project next to a standalone source file, with pinned dependencies.
 
 ## Implementation order and acceptance checks
 
-1. **Responsive build supervisor.** Move Cargo work off the host lock and emit
-   revisioned `building`/diagnostic/ready events. During a slow build, a slider
-   must still update the old worker and its output must remain visibly stale.
-   Saving revision B after A must prevent A from replacing B's worker.
+1. **Responsive build supervisor — polling slice implemented.** Cargo runs off
+   the host lock. Source revision and worker generation guard replacement;
+   during a slow build, a slider updates the old worker with stale-marked output.
+   Revision B supersedes A. Evented build and per-cell progress remain open.
 2. **Stable cell identity.** Persist IDs in valid `.rs` source and key drafts,
    bookmarks and status by ID. Renaming `data` should preserve its cell in the
    UI while dependencies use the new function name. Duplicate IDs must fail.
@@ -111,7 +111,7 @@ small Cargo project next to a standalone source file, with pinned dependencies.
    before introducing arbitrary HTML. Views should be small projections of
    values; large Rust objects remain in the worker and are fetched by page.
 
-The first two slices fix the largest architectural gap with Pluto: the current
-Rustimo editor cannot represent progress or preserve cell identity while source
-changes. They also prepare the browser for later multi-client synchronization
-without committing to Pluto's exact frontend transport.
+The remaining work fixes the largest architectural gap with Pluto: Rustimo has
+build status but no detailed execution progress or stable identity while source
+changes. Revisioned state prepares the browser for later multi-client
+synchronization without committing to Pluto's exact frontend transport.
