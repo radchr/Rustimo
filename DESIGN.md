@@ -1,6 +1,6 @@
 # Rustimo library design
 
-Status: first reactive app slice implemented; editor and build supervisor are next.
+Status: reactive app slice and local source editor implemented.
 
 ## Product contract
 
@@ -38,12 +38,17 @@ flowchart LR
     Graph --> Vault
 ```
 
-The current slice combines host and worker in one process. On UI interaction,
-it updates a `Ui<T>` held in the vault and invokes descendant functions in
-topological order. Code changes in the next slice will compile a new worker,
-retain the previous successful worker while compilation is pending, and swap
-after a successful build. A failed build must leave old outputs clearly stale.
-The worker boundary also contains aborts and native crashes from user code.
+The editor runs as a host process, and the compiled notebook runs as a separate
+worker executable. On UI interaction, the worker updates a `Ui<T>` in its vault
+and invokes descendants in topological order. On source save, the host rebuilds
+the example with Cargo, copies the executable to a unique worker path, checks
+the new worker's HTTP state, replays compatible slider values, and swaps it in.
+The previous worker remains available if compilation or startup fails; its
+outputs are marked stale. The worker boundary also contains aborts and native
+crashes from user code. The host currently serializes source rebuilds and UI
+requests behind one mutex, so interactions wait while Cargo is running.
+If the initial build fails, the host serves the source and diagnostics without
+a worker so the notebook can be fixed in the browser.
 
 Every cell is a function with one result. Its function name is its definition;
 its shared-reference parameter names are dependencies. `#[cell]` produces a
@@ -67,9 +72,10 @@ declared input types. Browser views are serialized separately from large values.
 
 1. **Reactive app slice — implemented.** Typed cells, graph checks, vault,
    slider, output views, local HTTP app, and tests for targeted invalidation.
-2. **Editor and build supervisor.** `rustimo edit <notebook>`, source saving,
-   Cargo JSON diagnostics mapped to cells, lazy/autorun mode, a separate worker
-   process, and successful-build swaps.
+2. **Local editor and build supervisor — implemented for examples.**
+   `rustimo edit crates/rustimo/examples/basic.rs`, source saving, Cargo JSON
+   diagnostics with source locations, a separate worker, and successful-build
+   swaps. Each new worker currently runs all cells before it is ready.
 3. **Notebook presentation.** Markdown cells, richer outputs, more typed UI
    inputs, and an app mode that hides source code.
 4. **Data workflow.** Paged DataFrame views, Polars example using actual files,
@@ -77,6 +83,9 @@ declared input types. Browser views are serialized separately from large values.
 5. **Portable source.** Support one `.rs` file through a CLI-generated Cargo
    project while keeping the source valid Rust and stable-toolchain compatible.
 
-The next acceptance test should edit a cell in the browser, observe a successful
-Cargo rebuild and targeted output refresh, then introduce a compiler error and
-confirm that the old worker remains usable with outputs marked stale.
+The next slice should make Cargo builds asynchronous to keep UI interactions
+responsive, preserve unaffected outputs when source changes, support stable
+cell IDs across edits, and handle notebooks outside the built-in examples
+directory. The current acceptance scenario was checked with a copied example:
+a successful edit changed an output; a compiler error left the old worker and
+slider usable with stale outputs; a successful fix replayed the slider value.

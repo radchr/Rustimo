@@ -10,31 +10,61 @@
     h1 { margin-bottom: 4px; }
     .note { color: #a8b6d1; margin-top: 0; }
     .cell { border: 1px solid #34425c; border-radius: 12px; background: #182239; padding: 18px; margin: 15px 0; }
+    .cell[data-status=stale] { border-color: #f78b45; }
+    .cell[data-status=error], .cell[data-status=blocked] { border-color: #ff8d8d; }
     .top { display: flex; justify-content: space-between; color: #a8b6d1; }
     .name { font-weight: 700; color: #e8edf7; }
     .view { white-space: pre-wrap; margin-top: 15px; }
     input[type=range] { width: 100%; accent-color: #f78b45; }
     .error { color: #ff8d8d; }
     #message { min-height: 1.5em; color: #ff8d8d; }
+    #source-panel { border: 1px solid #34425c; border-radius: 12px; padding: 18px; margin: 15px 0; background: #182239; }
+    #source-panel summary { cursor: pointer; font-weight: 700; }
+    #source-panel textarea { box-sizing: border-box; width: 100%; min-height: 360px; padding: 12px; margin-top: 12px; color: #e8edf7; background: #0d1220; border: 1px solid #34425c; border-radius: 8px; font: 14px/1.5 ui-monospace, Consolas, monospace; tab-size: 4; }
+    #source-panel button { padding: 9px 16px; margin-top: 10px; color: #0d1220; background: #f78b45; border: 0; border-radius: 7px; font-weight: 700; cursor: pointer; }
+    #source-panel button:disabled { opacity: .6; cursor: wait; }
+    #source-status { color: #a8b6d1; margin-left: 12px; }
+    #diagnostics { white-space: pre-wrap; color: #ff8d8d; }
   </style>
 </head>
 <body>
   <h1>🦀 Rustimo</h1>
   <p class="note">Реактивний блокнот Rust. Віджет змінює тільки залежні клітинки.</p>
   <div id="message" role="alert"></div>
+  <details id="source-panel" hidden>
+    <summary>Редагувати код ноутбука (.rs)<span id="source-status" role="status"></span></summary>
+    <label for="source-code">Код ноутбука (.rs)</label>
+    <textarea id="source-code" spellcheck="false"></textarea>
+    <div><button id="save-source" type="button">Зберегти й зібрати</button></div>
+    <div id="diagnostics" role="alert"></div>
+  </details>
   <main id="cells"></main>
   <script>
     const cells = document.getElementById('cells');
     const message = document.getElementById('message');
+    const sourcePanel = document.getElementById('source-panel');
+    const sourceCode = document.getElementById('source-code');
+    const saveSource = document.getElementById('save-source');
+    const sourceStatus = document.getElementById('source-status');
+    const diagnostics = document.getElementById('diagnostics');
     const pending = new Map();
+    let baseSource = null;
     let requestVersion = 0;
     let requestQueue = Promise.resolve();
 
     function render(state) {
+      if (state.source_status) showBuildStatus(state.source_status, state.diagnostics || []);
       cells.replaceChildren();
+      if (!state.cells.length) {
+        const empty = document.createElement('p');
+        empty.className = 'note';
+        empty.textContent = 'Ноутбук ще не скомпільований. Виправте код у редакторі.';
+        cells.append(empty);
+      }
       for (const cell of state.cells) {
         const card = document.createElement('section');
         card.className = 'cell';
+        card.dataset.status = cell.status;
         const top = document.createElement('div');
         top.className = 'top';
         const name = document.createElement('span');
@@ -78,6 +108,39 @@
       }
     }
 
+    function showBuildStatus(status, errors) {
+      sourceStatus.textContent = status === 'current' ? 'Збірка актуальна' : status === 'building' ? 'Збираю…' : 'Код збережено; попередня збірка ще працює';
+      diagnostics.textContent = errors.map(error => `${error.file || 'Cargo'}${error.line ? ':' + error.line : ''}: ${error.message}`).join('\n');
+    }
+
+    async function saveCode() {
+      if (baseSource === null) return;
+      saveSource.disabled = true;
+      showBuildStatus('building', []);
+      try {
+        await requestQueue;
+        const response = await fetch('/api/source', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source: sourceCode.value, base_source: baseSource })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || 'Не вдалося зберегти код');
+        baseSource = result.source;
+        requestVersion++;
+        message.textContent = '';
+        showBuildStatus(result.source_status, result.diagnostics || []);
+        render(result.state);
+      } catch (error) {
+        message.textContent = error.message;
+        showBuildStatus('stale', []);
+      } finally {
+        saveSource.disabled = false;
+      }
+    }
+
+    saveSource.addEventListener('click', saveCode);
+
     function updateSignal(name, value) {
       const version = ++requestVersion;
       requestQueue = requestQueue.then(async () => {
@@ -102,6 +165,18 @@
     fetch('/api/state')
       .then(response => response.json())
       .then(render)
+      .catch(error => { message.textContent = error.message; });
+
+    fetch('/api/source')
+      .then(async response => response.ok ? response.json() : null)
+      .then(result => {
+        if (!result) return;
+        baseSource = result.source;
+        sourceCode.value = result.source;
+        sourcePanel.hidden = false;
+        if (result.source_status === 'stale' && result.diagnostics?.length) sourcePanel.open = true;
+        showBuildStatus(result.source_status, result.diagnostics || []);
+      })
       .catch(error => { message.textContent = error.message; });
   </script>
 </body>

@@ -1,4 +1,5 @@
 mod display;
+mod editor;
 mod graph;
 mod runtime;
 mod server;
@@ -6,6 +7,7 @@ mod state;
 mod ui;
 
 pub use display::{View, capture_output, display};
+pub use editor::{BuildDiagnostic, serve_edit};
 pub use graph::ReactiveGraph;
 pub use runtime::{
     CellDescriptor, CellExecution, CellSnapshot, Notebook, NotebookSnapshot, RefSpec, RuntimeError,

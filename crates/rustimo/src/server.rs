@@ -7,9 +7,9 @@ use serde::Deserialize;
 
 use crate::Notebook;
 
-const PAGE: &str = include_str!("frontend.html");
+pub(crate) const PAGE: &str = include_str!("frontend.html");
 const MAX_HEADER: usize = 8192;
-const MAX_BODY: usize = 65536;
+const MAX_BODY: usize = 1_048_576;
 
 #[derive(Deserialize)]
 struct SignalRequest {
@@ -17,11 +17,11 @@ struct SignalRequest {
     value: serde_json::Value,
 }
 
-struct Request {
-    method: String,
-    path: String,
-    headers: Vec<(String, String)>,
-    body: Vec<u8>,
+pub(crate) struct Request {
+    pub(crate) method: String,
+    pub(crate) path: String,
+    pub(crate) headers: Vec<(String, String)>,
+    pub(crate) body: Vec<u8>,
 }
 
 pub fn serve(notebook: Notebook, addr: &str) -> io::Result<()> {
@@ -50,6 +50,19 @@ fn handle(mut stream: TcpStream, notebook: &Arc<Mutex<Notebook>>, host: &str) ->
         headers,
         body,
     } = read_request(&mut stream)?;
+    if !valid_request_origin(&headers, host) {
+        return send_response(
+            &mut stream,
+            "403 Forbidden",
+            "text/plain",
+            b"invalid host or origin",
+        );
+    }
+
+    handle_route(&mut stream, notebook, &method, &path, &body)
+}
+
+pub(crate) fn valid_request_origin(headers: &[(String, String)], host: &str) -> bool {
     let port = host.rsplit(':').next().unwrap_or("3001");
     let alternate_host = format!("localhost:{port}");
     let allowed_host = |value: &str| value == host || value == alternate_host;
@@ -57,24 +70,28 @@ fn handle(mut stream: TcpStream, notebook: &Arc<Mutex<Notebook>>, host: &str) ->
         .iter()
         .any(|(key, value)| key == "host" && allowed_host(value))
     {
-        return send_response(&mut stream, "403 Forbidden", "text/plain", b"invalid host");
+        return false;
     }
     if let Some((_, origin)) = headers.iter().find(|(key, _)| key == "origin") {
         let expected = format!("http://{host}");
         let alternate = format!("http://{alternate_host}");
         if origin != &expected && origin != &alternate {
-            return send_response(
-                &mut stream,
-                "403 Forbidden",
-                "text/plain",
-                b"invalid origin",
-            );
+            return false;
         }
     }
+    true
+}
 
-    match (method.as_str(), path.as_str()) {
+fn handle_route(
+    stream: &mut TcpStream,
+    notebook: &Arc<Mutex<Notebook>>,
+    method: &str,
+    path: &str,
+    body: &[u8],
+) -> io::Result<()> {
+    match (method, path) {
         ("GET", "/") => send_response(
-            &mut stream,
+            stream,
             "200 OK",
             "text/html; charset=utf-8",
             PAGE.as_bytes(),
@@ -85,14 +102,14 @@ fn handle(mut stream: TcpStream, notebook: &Arc<Mutex<Notebook>>, host: &str) ->
                 .unwrap_or_else(|e| e.into_inner())
                 .snapshot();
             let json = serde_json::to_vec(&state).map_err(io::Error::other)?;
-            send_response(&mut stream, "200 OK", "application/json", &json)
+            send_response(stream, "200 OK", "application/json", &json)
         }
         ("POST", "/api/signal") => {
-            let request: SignalRequest = match serde_json::from_slice(&body) {
+            let request: SignalRequest = match serde_json::from_slice(body) {
                 Ok(request) => request,
                 Err(error) => {
                     return send_response(
-                        &mut stream,
+                        stream,
                         "400 Bad Request",
                         "text/plain",
                         error.to_string().as_bytes(),
@@ -104,12 +121,12 @@ fn handle(mut stream: TcpStream, notebook: &Arc<Mutex<Notebook>>, host: &str) ->
                 Ok(_) => {
                     let json =
                         serde_json::to_vec(&notebook.snapshot()).map_err(io::Error::other)?;
-                    send_response(&mut stream, "200 OK", "application/json", &json)
+                    send_response(stream, "200 OK", "application/json", &json)
                 }
                 Err(error) => {
                     let json = serde_json::to_vec(&error).map_err(io::Error::other)?;
                     send_response(
-                        &mut stream,
+                        stream,
                         "422 Unprocessable Entity",
                         "application/json",
                         &json,
@@ -117,11 +134,11 @@ fn handle(mut stream: TcpStream, notebook: &Arc<Mutex<Notebook>>, host: &str) ->
                 }
             }
         }
-        _ => send_response(&mut stream, "404 Not Found", "text/plain", b"not found"),
+        _ => send_response(stream, "404 Not Found", "text/plain", b"not found"),
     }
 }
 
-fn read_request(stream: &mut TcpStream) -> io::Result<Request> {
+pub(crate) fn read_request(stream: &mut TcpStream) -> io::Result<Request> {
     let mut bytes = Vec::new();
     let mut chunk = [0u8; 4096];
     let header_end = loop {
@@ -197,7 +214,12 @@ fn read_request(stream: &mut TcpStream) -> io::Result<Request> {
     })
 }
 
-fn send_response(stream: &mut TcpStream, status: &str, mime: &str, body: &[u8]) -> io::Result<()> {
+pub(crate) fn send_response(
+    stream: &mut TcpStream,
+    status: &str,
+    mime: &str,
+    body: &[u8],
+) -> io::Result<()> {
     write!(
         stream,
         "HTTP/1.1 {status}\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n",

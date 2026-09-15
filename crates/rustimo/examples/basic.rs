@@ -43,6 +43,7 @@ fn independent() -> &'static str {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut app = notebook!(data, limit, filtered, count, independent)?;
     app.run_all()?;
-    serve(app, "127.0.0.1:3001")?;
+    let addr = std::env::var("RUSTIMO_ADDR").unwrap_or_else(|_| "127.0.0.1:3001".to_owned());
+    serve(app, &addr)?;
     Ok(())
 }
