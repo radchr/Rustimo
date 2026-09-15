@@ -96,3 +96,7 @@ cell IDs across edits, and handle notebooks outside the built-in examples
 directory. The current acceptance scenario was checked with a copied example:
 a successful edit changed an output; a compiler error left the old worker and
 slider usable with stale outputs; a successful fix replayed the slider value.
+
+The [Pluto architecture comparison](PLUTO_ARCHITECTURE.md) separates mechanisms
+that can be adapted directly from Julia-specific evaluation behavior and gives
+acceptance checks for the next implementation slices.
