@@ -11,6 +11,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::server::{PAGE, Request, read_request, send_response, valid_request_origin};
+use crate::source::{parse_cells, replace_cell};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct BuildDiagnostic {
@@ -21,6 +22,13 @@ pub struct BuildDiagnostic {
 
 #[derive(Deserialize)]
 struct SaveRequest {
+    source: String,
+    base_source: String,
+}
+
+#[derive(Deserialize)]
+struct SaveCellRequest {
+    name: String,
     source: String,
     base_source: String,
 }
@@ -144,6 +152,8 @@ fn handle(mut stream: TcpStream, editor: &Arc<Mutex<Editor>>, host: &str) -> io:
             let source = fs::read_to_string(&editor.source_file)?;
             let json = serde_json::json!({
                 "source": source,
+                "cells": parse_cells(&source).unwrap_or_default(),
+                "filename": editor.source_file.file_name().and_then(|name| name.to_str()),
                 "source_status": editor.source_status,
                 "diagnostics": editor.diagnostics,
             });
@@ -154,7 +164,7 @@ fn handle(mut stream: TcpStream, editor: &Arc<Mutex<Editor>>, host: &str) -> io:
             let state = editor.state()?;
             send_json(&mut stream, "200 OK", &state)
         }
-        ("POST", "/api/signal") => {
+        ("POST", "/api/signal" | "/api/run") => {
             let editor = editor.lock().unwrap_or_else(|e| e.into_inner());
             let Some(worker) = editor.worker.as_ref() else {
                 return send_json(
@@ -163,7 +173,7 @@ fn handle(mut stream: TcpStream, editor: &Arc<Mutex<Editor>>, host: &str) -> io:
                     &serde_json::json!({"message": "notebook has not compiled yet"}),
                 );
             };
-            let (status, mut state) = worker_request(&worker.addr, "POST", "/api/signal", &body)?;
+            let (status, mut state) = worker_request(&worker.addr, "POST", &path, &body)?;
             if status == 200 {
                 editor.decorate_state(&mut state);
             }
@@ -207,6 +217,53 @@ fn handle(mut stream: TcpStream, editor: &Arc<Mutex<Editor>>, host: &str) -> io:
             let state = editor.state()?;
             let json = serde_json::json!({
                 "source": request.source,
+                "cells": parse_cells(&request.source).unwrap_or_default(),
+                "source_status": editor.source_status,
+                "diagnostics": editor.diagnostics,
+                "state": state,
+            });
+            send_json(&mut stream, "200 OK", &json)
+        }
+        ("POST", "/api/cell") => {
+            let request: SaveCellRequest = match serde_json::from_slice(&body) {
+                Ok(request) => request,
+                Err(error) => {
+                    return send_json(
+                        &mut stream,
+                        "400 Bad Request",
+                        &serde_json::json!({"message": error.to_string()}),
+                    );
+                }
+            };
+            let mut editor = editor.lock().unwrap_or_else(|e| e.into_inner());
+            let current = fs::read_to_string(&editor.source_file)?;
+            if current != request.base_source {
+                return send_json(
+                    &mut stream,
+                    "409 Conflict",
+                    &serde_json::json!({"message": "source changed since it was opened; reload before saving"}),
+                );
+            }
+            let updated = match replace_cell(&current, &request.name, &request.source) {
+                Ok(updated) => updated,
+                Err(error) => {
+                    return send_json(
+                        &mut stream,
+                        "422 Unprocessable Entity",
+                        &serde_json::json!({"message": error}),
+                    );
+                }
+            };
+            if updated != current {
+                fs::write(&editor.source_file, &updated)?;
+                editor.source_status = "building";
+                editor.diagnostics.clear();
+                editor.rebuild()?;
+            }
+            let state = editor.state()?;
+            let json = serde_json::json!({
+                "source": updated,
+                "cells": parse_cells(&updated).unwrap_or_default(),
                 "source_status": editor.source_status,
                 "diagnostics": editor.diagnostics,
                 "state": state,

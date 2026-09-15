@@ -7,12 +7,17 @@ use serde::Serialize;
 pub enum View {
     Empty,
     Text(String),
+    Markdown(String),
     Widget(serde_json::Value),
 }
 
 impl View {
     pub fn text(text: impl Into<String>) -> Self {
         Self::Text(text.into())
+    }
+
+    pub fn markdown(markdown: impl Into<String>) -> Self {
+        Self::Markdown(markdown.into())
     }
 }
 

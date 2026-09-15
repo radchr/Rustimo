@@ -1,6 +1,6 @@
 # Rustimo library design
 
-Status: reactive app slice and local source editor implemented.
+Status: reactive runtime, local source editor, and cell-oriented notebook UI implemented.
 
 ## Product contract
 
@@ -38,11 +38,17 @@ flowchart LR
     Graph --> Vault
 ```
 
+The browser presents each `#[cell]` function as one editable code/output pair.
+`syn` and `proc-macro2` locate top-level functions by byte spans, so saving one
+cell changes only that region of the `.rs` file. Presentation follows file order;
+the graph panel shows execution dependencies. Notebook mode shows source and
+diagnostics, while app mode shows only outputs and interactive elements.
+
 The editor runs as a host process, and the compiled notebook runs as a separate
 worker executable. On UI interaction, the worker updates a `Ui<T>` in its vault
 and invokes descendants in topological order. On source save, the host rebuilds
 the example with Cargo, copies the executable to a unique worker path, checks
-the new worker's HTTP state, replays compatible slider values, and swaps it in.
+the new worker's HTTP state, replays compatible widget values, and swaps it in.
 The previous worker remains available if compilation or startup fails; its
 outputs are marked stale. The worker boundary also contains aborts and native
 crashes from user code. The host currently serializes source rebuilds and UI
@@ -71,13 +77,14 @@ declared input types. Browser views are serialized separately from large values.
 ## Implementation path
 
 1. **Reactive app slice — implemented.** Typed cells, graph checks, vault,
-   slider, output views, local HTTP app, and tests for targeted invalidation.
+   slider/text/checkbox widgets, output views, local HTTP app, and tests for targeted invalidation.
 2. **Local editor and build supervisor — implemented for examples.**
    `rustimo edit crates/rustimo/examples/basic.rs`, source saving, Cargo JSON
    diagnostics with source locations, a separate worker, and successful-build
    swaps. Each new worker currently runs all cells before it is ready.
-3. **Notebook presentation.** Markdown cells, richer outputs, more typed UI
-   inputs, and an app mode that hides source code.
+3. **Notebook presentation — initial slice implemented.** Per-cell editor,
+   Markdown output, dependency panel, manual cell run, and an app mode that
+   hides source code. Richer output types and editor commands remain open.
 4. **Data workflow.** Paged DataFrame views, Polars example using actual files,
    cancellation and resource limits for expensive cells.
 5. **Portable source.** Support one `.rs` file through a CLI-generated Cargo

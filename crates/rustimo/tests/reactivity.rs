@@ -7,6 +7,7 @@ static DATA_RUNS: AtomicUsize = AtomicUsize::new(0);
 static LIMIT_RUNS: AtomicUsize = AtomicUsize::new(0);
 static FILTER_RUNS: AtomicUsize = AtomicUsize::new(0);
 static OTHER_RUNS: AtomicUsize = AtomicUsize::new(0);
+static SUMMARY_RUNS: AtomicUsize = AtomicUsize::new(0);
 static TEST_LOCK: Mutex<()> = Mutex::new(());
 
 #[cell]
@@ -75,6 +76,22 @@ fn child(fails_on_signal: &u32) -> u32 {
 #[cell]
 fn mismatched_name() -> Ui<u32> {
     Ui::slider("other_name", 0, 30, 15)
+}
+
+#[cell]
+fn title() -> Ui<String> {
+    Ui::text("title", "Report").label("Title")
+}
+
+#[cell]
+fn details() -> Ui<bool> {
+    Ui::checkbox("details", false).label("Details")
+}
+
+#[cell]
+fn summary(title: &Ui<String>, details: &Ui<bool>) -> String {
+    SUMMARY_RUNS.fetch_add(1, Ordering::SeqCst);
+    format!("{}: {}", title.value(), details.value())
 }
 
 #[test]
@@ -182,4 +199,66 @@ fn an_error_invalidates_descendant_values() {
 fn a_signal_must_use_its_producing_cell_name() {
     let mut notebook = notebook!(mismatched_name).unwrap();
     assert_eq!(notebook.run_all().unwrap_err().code, "signal_name_mismatch");
+}
+
+#[test]
+fn text_and_checkbox_rerun_only_their_consumer() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    SUMMARY_RUNS.store(0, Ordering::SeqCst);
+    OTHER_RUNS.store(0, Ordering::SeqCst);
+    let mut notebook = notebook!(title, details, summary, other).unwrap();
+    notebook.run_all().unwrap();
+    assert_eq!(
+        notebook.get::<String>("summary").unwrap().as_str(),
+        "Report: false"
+    );
+
+    assert_eq!(
+        notebook
+            .set_signal("title", serde_json::json!("New title"))
+            .unwrap(),
+        vec!["summary"]
+    );
+    assert_eq!(
+        notebook
+            .set_signal("details", serde_json::json!(true))
+            .unwrap(),
+        vec!["summary"]
+    );
+    assert_eq!(
+        notebook.get::<String>("summary").unwrap().as_str(),
+        "New title: true"
+    );
+    assert_eq!(SUMMARY_RUNS.load(Ordering::SeqCst), 3);
+    assert_eq!(OTHER_RUNS.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        notebook
+            .set_signal("details", serde_json::json!("yes"))
+            .unwrap_err()
+            .code,
+        "invalid_signal"
+    );
+    assert!(notebook.get::<Ui<bool>>("details").unwrap().value());
+}
+
+#[test]
+fn running_a_cell_runs_its_descendants_but_not_independent_cells() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    let mut notebook = notebook!(data, limit, filtered, other).unwrap();
+    notebook.run_all().unwrap();
+    let executed = notebook.run_from("data").unwrap();
+    assert_eq!(executed, vec!["data", "filtered"]);
+    let state = notebook.snapshot();
+    let runs = |name: &str| {
+        state
+            .cells
+            .iter()
+            .find(|cell| cell.name == name)
+            .unwrap()
+            .run_count
+    };
+    assert_eq!(runs("data"), 2);
+    assert_eq!(runs("filtered"), 2);
+    assert_eq!(runs("limit"), 1);
+    assert_eq!(runs("other"), 1);
 }

@@ -11,17 +11,23 @@ Run the editable browser notebook from this directory:
 cargo run -p rustimo --bin rustimo -- edit crates/rustimo/examples/basic.rs
 ```
 
-Open `http://127.0.0.1:3000`. Expand **Редагувати код ноутбука (.rs)**,
-change a cell, and click **Зберегти й зібрати**. Cargo diagnostics appear beside
-the source. A successful build starts a new notebook worker; a failed build
-keeps the last working notebook available and marks its outputs stale. Slider
-values are replayed into a successful new worker when the signal still exists.
+Open `http://127.0.0.1:3000`. Each `#[cell]` function appears as a notebook cell
+with its Rust code, output, dependencies, and a **Зберегти / виконати** action.
+Click **Запустити** to run a cell and its descendants, or **Запустити все** for
+the whole notebook. **Режим застосунку** hides the code and development panels.
+The dependency graph links back to cells. Expand the full-file editor at the
+bottom to change imports, types, or registration outside cells.
+
+Saving changed code invokes Cargo. Diagnostics appear above the cells and beside
+the full source. A successful build starts a new notebook worker; a failed build
+keeps the last working notebook available and marks its outputs stale. Compatible
+slider, text, and checkbox values are replayed into a successful new worker.
 If the initial source does not compile, the editor still opens so you can fix it.
 
-Moving the slider reruns `filtered` and `count` without a Cargo build;
-`data`, `limit`, and `independent` keep their previous run counts. The notebook
-source is a normal Rust file at `crates/rustimo/examples/basic.rs` and stays
-available after restarting the process.
+Moving the slider reruns `filtered`, `count`, and `report` without a Cargo build;
+`data`, `limit`, and `independent` keep their previous run counts. Editing the
+text or checkbox widget reruns `report`. The notebook source is a normal Rust
+file at `crates/rustimo/examples/basic.rs` and persists across restarts.
 
 To run the app without the editor, use `cargo run -p rustimo --example basic`
 and open `http://127.0.0.1:3001`.
@@ -29,15 +35,17 @@ and open `http://127.0.0.1:3001`.
 The public API lives in `crates/rustimo`, the compile-time cell generation in
 `crates/rustimo_macros`. `#[cell]` currently accepts synchronous functions with
 an explicit return type and immutable references as cross-cell inputs.
-`notebook!(...)` explicitly registers cells. A cell can call `display(View::text(...))`
-for its browser output. A cell returning `Ui<T>` becomes a reactive slider signal.
+`notebook!(...)` explicitly registers cells. A cell can call
+`display(View::text(...))` or `display(View::markdown(...))` for its browser output.
+`Ui::slider`, `Ui::text`, and `Ui::checkbox` are reactive signals.
 The architectural decisions and next acceptance test are in `DESIGN.md`.
 
 Current scope: local single-user editor for `.rs` files in
-`crates/rustimo/examples`, slider, text output, and Cargo diagnostics. Each
-source rebuild currently runs all cells in the new worker; signals rerun only
-descendants. Markdown cells, other widget types, DataFrame pagination, and
-portable standalone `.rs` notebooks remain to be implemented.
+`crates/rustimo/examples`, typed function cells, three widget types, text and
+Markdown output, and Cargo diagnostics. Code edits rebuild the entire example
+and execute all cells in the new worker. Signals and manual cell runs execute
+only descendants. Arbitrary Rust snippets, multiple definitions per cell,
+DataFrame pagination, and portable standalone `.rs` notebooks remain future work.
 
 Run verification:
 

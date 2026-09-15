@@ -3,181 +3,400 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Rustimo — reactive Rust notebook</title>
+  <title>Rustimo — реактивний Rust-ноутбук</title>
   <style>
-    :root { font: 16px system-ui, sans-serif; color-scheme: dark; background: #0d1220; color: #e8edf7; }
-    body { max-width: 850px; margin: 32px auto; padding: 0 20px; }
-    h1 { margin-bottom: 4px; }
-    .note { color: #a8b6d1; margin-top: 0; }
-    .cell { border: 1px solid #34425c; border-radius: 12px; background: #182239; padding: 18px; margin: 15px 0; }
-    .cell[data-status=stale] { border-color: #f78b45; }
-    .cell[data-status=error], .cell[data-status=blocked] { border-color: #ff8d8d; }
-    .top { display: flex; justify-content: space-between; color: #a8b6d1; }
-    .name { font-weight: 700; color: #e8edf7; }
-    .view { white-space: pre-wrap; margin-top: 15px; }
-    input[type=range] { width: 100%; accent-color: #f78b45; }
-    .error { color: #ff8d8d; }
-    #message { min-height: 1.5em; color: #ff8d8d; }
-    #source-panel { border: 1px solid #34425c; border-radius: 12px; padding: 18px; margin: 15px 0; background: #182239; }
-    #source-panel summary { cursor: pointer; font-weight: 700; }
-    #source-panel textarea { box-sizing: border-box; width: 100%; min-height: 360px; padding: 12px; margin-top: 12px; color: #e8edf7; background: #0d1220; border: 1px solid #34425c; border-radius: 8px; font: 14px/1.5 ui-monospace, Consolas, monospace; tab-size: 4; }
-    #source-panel button { padding: 9px 16px; margin-top: 10px; color: #0d1220; background: #f78b45; border: 0; border-radius: 7px; font-weight: 700; cursor: pointer; }
-    #source-panel button:disabled { opacity: .6; cursor: wait; }
-    #source-status { color: #a8b6d1; margin-left: 12px; }
-    #diagnostics { white-space: pre-wrap; color: #ff8d8d; }
+    :root { font: 15px system-ui, sans-serif; color: #263044; background: #f6f8fc; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    button, input, textarea { font: inherit; }
+    button { cursor: pointer; }
+    button:disabled { opacity: .55; cursor: wait; }
+    .bar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 12px max(20px, calc((100vw - 1320px) / 2)); background: #fff; border-bottom: 1px solid #e4e8f0; position: sticky; top: 0; z-index: 5; }
+    .brand { display: flex; align-items: center; gap: 10px; color: #242b47; font-size: 21px; font-weight: 800; letter-spacing: -.03em; }
+    .brand-mark { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: #eaf0ff; color: #4d60c3; font-size: 20px; }
+    .file-name { font: 13px ui-monospace, Consolas, monospace; color: #68758b; background: #f1f4f9; padding: 6px 9px; border-radius: 6px; }
+    .toolbar { display: flex; gap: 8px; align-items: center; margin-left: auto; }
+    .toolbar button, .cell-actions button, .file-actions button { border: 1px solid #d8dfec; background: #fff; color: #40506c; padding: 7px 10px; border-radius: 7px; font-weight: 600; }
+    .toolbar button:hover, .cell-actions button:hover, .file-actions button:hover { border-color: #788ad6; color: #4259bb; }
+    .toolbar .primary, .cell-actions .primary, .file-actions .primary { color: #fff; background: #5063c8; border-color: #5063c8; }
+    .toolbar .primary:hover, .cell-actions .primary:hover, .file-actions .primary:hover { background: #4053b7; color: #fff; }
+    .workspace { max-width: 1320px; margin: auto; display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 26px; padding: 24px 20px 80px; }
+    .main-column { min-width: 0; max-width: 900px; width: 100%; margin: 0 auto; }
+    .status-line { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 0 0 14px; color: #6b7790; font-size: 13px; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #37a26b; }
+    .status-line[data-status=stale] .status-dot { background: #ec9b38; }
+    .status-line[data-status=building] .status-dot { background: #6386ea; }
+    #message { min-height: 0; color: #b94c56; }
+    #message:not(:empty) { padding: 12px; background: #fff0f1; border: 1px solid #f3cccf; border-radius: 8px; margin-bottom: 16px; }
+    .cell-card { position: relative; background: #fff; border: 1px solid #e1e6ee; border-radius: 11px; margin: 0 0 16px; box-shadow: 0 3px 12px #26365c0a; overflow: hidden; }
+    .cell-card[data-status=stale] { border-left: 4px solid #ec9b38; }
+    .cell-card[data-status=error], .cell-card[data-status=blocked] { border-left: 4px solid #d95e67; }
+    .cell-head { display: flex; align-items: center; gap: 9px; padding: 10px 14px; border-bottom: 1px solid #edf0f5; min-height: 44px; }
+    .cell-index { color: #8b97aa; font: 12px ui-monospace, Consolas, monospace; min-width: 18px; }
+    .cell-name { font: 700 13px ui-monospace, Consolas, monospace; color: #4151a8; }
+    .cell-refs { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+    .cell-refs span { color: #728099; background: #f2f5fa; font: 11px ui-monospace, Consolas, monospace; padding: 3px 5px; border-radius: 4px; }
+    .cell-actions { display: flex; gap: 6px; margin-left: auto; }
+    .cell-actions button { padding: 5px 8px; font-size: 12px; white-space: nowrap; }
+    .cell-source { border-bottom: 1px solid #edf0f5; }
+    .cell-source summary { color: #69758d; font-size: 12px; padding: 7px 14px; cursor: pointer; }
+    .cell-source textarea, #file-source { display: block; width: 100%; min-height: 112px; resize: vertical; border: 0; outline: 0; background: #fbfcff; padding: 12px 16px; color: #263044; font: 13px/1.55 ui-monospace, Consolas, monospace; tab-size: 4; }
+    .source-actions { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #fbfcff; }
+    .source-actions button { border: 1px solid #d8dfec; border-radius: 6px; background: #fff; color: #4259bb; padding: 5px 9px; font-size: 12px; font-weight: 700; }
+    .source-actions .hint { color: #93a0b4; font-size: 11px; }
+    .output { padding: 18px 20px 20px; min-height: 52px; }
+    .output-label { display: block; color: #9ba6b7; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 8px; }
+    .output-text { white-space: pre-wrap; color: #29354b; }
+    .output-markdown h1, .output-markdown h2, .output-markdown h3 { color: #263044; margin: .15em 0 .55em; letter-spacing: -.025em; }
+    .output-markdown h1 { font-size: 26px; }
+    .output-markdown h2 { font-size: 20px; }
+    .output-markdown h3 { font-size: 17px; }
+    .output-markdown p { margin: .55em 0; line-height: 1.6; }
+    .output-markdown code { background: #f2f4fa; padding: 2px 4px; border-radius: 4px; }
+    .output-empty { color: #aab4c2; font-style: italic; }
+    .widget { max-width: 420px; }
+    .widget label { display: block; font-weight: 600; margin-bottom: 9px; }
+    .widget input[type=range] { width: 100%; accent-color: #5063c8; }
+    .widget input[type=text] { width: 100%; padding: 9px 11px; border: 1px solid #cfd7e7; border-radius: 7px; }
+    .widget .check { display: flex; align-items: center; gap: 9px; }
+    .widget .check input { width: 17px; height: 17px; accent-color: #5063c8; }
+    .cell-error { color: #b94c56; background: #fff3f4; margin: 0; padding: 10px 18px; font-size: 13px; }
+    .cell-meta { display: flex; gap: 12px; padding: 6px 14px; color: #a0aabd; font-size: 11px; border-top: 1px solid #f1f3f7; }
+    .graph { background: #fff; border: 1px solid #e1e6ee; border-radius: 11px; padding: 15px; height: max-content; position: sticky; top: 85px; }
+    .graph h2 { font-size: 14px; margin: 0 0 6px; }
+    .graph p { color: #8995a8; font-size: 12px; margin: 0 0 12px; }
+    .graph ul { list-style: none; margin: 0; padding: 0; }
+    .graph li { margin: 0 0 8px; }
+    .graph button { border: 0; background: #f6f8fc; color: #4259bb; width: 100%; border-radius: 6px; padding: 8px; text-align: left; font: 700 12px ui-monospace, Consolas, monospace; }
+    .graph small { display: block; color: #8a96aa; font: 11px ui-monospace, Consolas, monospace; margin: 4px 0 0 8px; }
+    #file-panel { margin-top: 28px; padding: 13px 16px; background: #fff; border: 1px solid #e1e6ee; border-radius: 10px; }
+    #file-panel summary { cursor: pointer; font-weight: 600; color: #67758e; }
+    #file-source { min-height: 280px; margin: 12px 0 0; border: 1px solid #e1e6ee; border-radius: 7px; }
+    .file-actions { display: flex; gap: 8px; align-items: center; margin: 10px 0; }
+    #diagnostics { white-space: pre-wrap; color: #b94c56; font: 12px/1.5 ui-monospace, Consolas, monospace; }
+    .empty { color: #8491a6; padding: 30px; text-align: center; }
+    body.app-mode .cell-head, body.app-mode .cell-source, body.app-mode .cell-meta, body.app-mode #file-panel, body.app-mode .graph, body.app-mode #run-all, body.app-mode #graph-button, body.app-mode .status-line { display: none; }
+    body.app-mode .workspace { grid-template-columns: minmax(0, 1fr); }
+    body.app-mode .main-column { max-width: 760px; }
+    body.app-mode .output-label { display: none; }
+    body.app-mode .cell-card { border: 0; box-shadow: none; background: transparent; margin-bottom: 5px; }
+    body.app-mode .output { padding: 12px 0; }
+    @media (max-width: 900px) { .workspace { grid-template-columns: 1fr; } .graph { display: none; position: static; } .graph.open { display: block; grid-row: 1; } .toolbar { margin-left: 0; } }
+    @media (max-width: 540px) { .bar { padding: 10px 16px; } .workspace { padding: 18px 12px; } .toolbar { width: 100%; } .toolbar button { flex: 1; } .cell-refs { display: none; } }
   </style>
 </head>
 <body>
-  <h1>🦀 Rustimo</h1>
-  <p class="note">Реактивний блокнот Rust. Віджет змінює тільки залежні клітинки.</p>
-  <div id="message" role="alert"></div>
-  <details id="source-panel" hidden>
-    <summary>Редагувати код ноутбука (.rs)<span id="source-status" role="status"></span></summary>
-    <label for="source-code">Код ноутбука (.rs)</label>
-    <textarea id="source-code" spellcheck="false"></textarea>
-    <div><button id="save-source" type="button">Зберегти й зібрати</button></div>
-    <div id="diagnostics" role="alert"></div>
-  </details>
-  <main id="cells"></main>
+  <header class="bar">
+    <div class="brand"><span class="brand-mark">🦀</span>Rustimo</div>
+    <span class="file-name" id="file-name">ноутбук.rs</span>
+    <nav class="toolbar" aria-label="Дії ноутбука">
+      <button id="run-all" type="button" class="primary">▶ Запустити все</button>
+      <button id="mode-button" type="button">Режим застосунку</button>
+      <button id="graph-button" type="button">Граф</button>
+    </nav>
+  </header>
+  <div class="workspace">
+    <div class="main-column">
+      <div class="status-line" id="status-line"><span class="status-dot"></span><span id="build-status">Завантаження…</span><span id="cell-count"></span></div>
+      <div id="message" role="alert"></div>
+      <main id="cells"></main>
+      <details id="file-panel" hidden>
+        <summary>Весь .rs-файл: imports, типи та реєстрація клітинок</summary>
+        <textarea id="file-source" spellcheck="false" aria-label="Весь Rust-файл"></textarea>
+        <div class="file-actions"><button id="save-file" type="button" class="primary">Зберегти файл і зібрати</button><span>Для змін поза клітинками</span></div>
+        <div id="diagnostics" role="alert"></div>
+      </details>
+    </div>
+    <aside class="graph" id="graph" aria-label="Граф залежностей"><h2>Потік даних</h2><p>Параметри функцій задають залежності.</p><ul id="graph-list"></ul></aside>
+  </div>
   <script>
-    const cells = document.getElementById('cells');
-    const message = document.getElementById('message');
-    const sourcePanel = document.getElementById('source-panel');
-    const sourceCode = document.getElementById('source-code');
-    const saveSource = document.getElementById('save-source');
-    const sourceStatus = document.getElementById('source-status');
+    const cellsElement = document.getElementById('cells');
+    const graphElement = document.getElementById('graph');
+    const graphList = document.getElementById('graph-list');
+    const filePanel = document.getElementById('file-panel');
+    const fileSource = document.getElementById('file-source');
     const diagnostics = document.getElementById('diagnostics');
-    const pending = new Map();
+    const message = document.getElementById('message');
+    const drafts = new Map();
+    const codeOpen = new Map();
+    const signalTimers = new Map();
     let baseSource = null;
-    let requestVersion = 0;
+    let sourceCells = [];
+    let currentState = null;
     let requestQueue = Promise.resolve();
+    let requestVersion = 0;
+    let fileDraft = false;
+
+    function node(tag, className, text) {
+      const element = document.createElement(tag);
+      if (className) element.className = className;
+      if (text !== undefined) element.textContent = text;
+      return element;
+    }
+
+    function inlineMarkdown(parent, text) {
+      const pattern = /(\*\*[^*]+\*\*|`[^`]+`)/g;
+      let offset = 0;
+      for (const match of text.matchAll(pattern)) {
+        parent.append(document.createTextNode(text.slice(offset, match.index)));
+        const token = match[0];
+        const kind = token.startsWith('**') ? 'strong' : 'code';
+        parent.append(node(kind, '', token.slice(kind === 'strong' ? 2 : 1, kind === 'strong' ? -2 : -1)));
+        offset = match.index + token.length;
+      }
+      parent.append(document.createTextNode(text.slice(offset)));
+    }
+
+    function markdownView(text) {
+      const wrapper = node('div', 'output-markdown');
+      for (const line of text.split('\n')) {
+        if (!line.trim()) continue;
+        const heading = /^(#{1,3})\s+(.+)$/.exec(line);
+        const paragraph = node(heading ? `h${heading[1].length}` : 'p');
+        inlineMarkdown(paragraph, heading ? heading[2] : line);
+        wrapper.append(paragraph);
+      }
+      return wrapper;
+    }
+
+    function showBuildStatus(state) {
+      const status = state.source_status || 'current';
+      const label = status === 'current' ? 'Збірка актуальна' : status === 'building' ? 'Збираю ноутбук…' : 'Код збережено; output попередньої збірки';
+      document.getElementById('status-line').dataset.status = status;
+      document.getElementById('build-status').textContent = label;
+      document.getElementById('cell-count').textContent = `· ${state.cells.length} клітинок`;
+      const errors = state.diagnostics || [];
+      diagnostics.textContent = errors.map(error => `${error.file || 'Cargo'}${error.line ? ':' + error.line : ''}: ${error.message}`).join('\n');
+      if (errors.length && status === 'stale') {
+        message.textContent = diagnostics.textContent;
+        filePanel.open = true;
+      }
+    }
+
+    function preserveFocus() {
+      const active = document.activeElement;
+      if (!active) return null;
+      const key = active.dataset.signal || active.dataset.cell;
+      if (!key) return null;
+      const canSelect = active.tagName === 'TEXTAREA' || active.type === 'text';
+      return { type: active.dataset.signal ? 'signal' : 'cell', key, start: canSelect ? active.selectionStart : null, end: canSelect ? active.selectionEnd : null };
+    }
+
+    function restoreFocus(focus) {
+      if (!focus) return;
+      const selector = focus.type === 'signal' ? `[data-signal="${focus.key}"]` : `[data-cell="${focus.key}"]`;
+      const target = cellsElement.querySelector(selector);
+      if (!target) return;
+      target.focus();
+      if (focus.start !== null && focus.start !== undefined && target.setSelectionRange) target.setSelectionRange(focus.start, focus.end);
+    }
 
     function render(state) {
-      if (state.source_status) showBuildStatus(state.source_status, state.diagnostics || []);
-      cells.replaceChildren();
-      if (!state.cells.length) {
-        const empty = document.createElement('p');
-        empty.className = 'note';
-        empty.textContent = 'Ноутбук ще не скомпільований. Виправте код у редакторі.';
-        cells.append(empty);
-      }
-      for (const cell of state.cells) {
-        const card = document.createElement('section');
-        card.className = 'cell';
+      const focus = preserveFocus();
+      currentState = state;
+      showBuildStatus(state);
+      cellsElement.replaceChildren();
+      if (!state.cells.length) cellsElement.append(node('p', 'empty', 'Ноутбук ще не скомпільований. Виправте код у редакторі всього файлу.'));
+      for (const [index, cell] of state.cells.entries()) {
+        const source = sourceCells.find(item => item.name === cell.name);
+        const card = node('section', 'cell-card');
+        card.id = `cell-${cell.name}`;
         card.dataset.status = cell.status;
-        const top = document.createElement('div');
-        top.className = 'top';
-        const name = document.createElement('span');
-        name.className = 'name';
-        name.textContent = cell.name;
-        const status = document.createElement('span');
-        status.textContent = `${cell.status} · запусків: ${cell.run_count} · ${cell.execution_time_us} µs`;
-        top.append(name, status);
-        card.append(top);
-
-        if (cell.view.kind === 'widget' && cell.view.value.kind === 'slider') {
-          const widget = cell.view.value;
-          const label = document.createElement('label');
-          label.textContent = `${widget.label || widget.name}: ${widget.value}`;
-          const slider = document.createElement('input');
-          slider.type = 'range';
-          slider.min = widget.min;
-          slider.max = widget.max;
-          slider.step = widget.step || 1;
-          slider.value = widget.value;
-          slider.addEventListener('input', () => {
-            label.textContent = `${widget.label || widget.name}: ${slider.value}`;
-            clearTimeout(pending.get(widget.name));
-            pending.set(widget.name, setTimeout(() => updateSignal(widget.name, Number(slider.value)), 60));
+        const head = node('div', 'cell-head');
+        head.append(node('span', 'cell-index', String(index + 1).padStart(2, '0')));
+        head.append(node('span', 'cell-name', cell.name));
+        const refs = node('div', 'cell-refs');
+        for (const name of source?.refs || []) refs.append(node('span', '', `← ${name}`));
+        head.append(refs);
+        const actions = node('div', 'cell-actions');
+        const run = node('button', '', '▶ Запустити');
+        run.type = 'button';
+        run.addEventListener('click', () => source ? saveCell(cell.name) : runCell(cell.name));
+        actions.append(run);
+        head.append(actions);
+        card.append(head);
+        if (source) {
+          const details = node('details', 'cell-source');
+          details.open = codeOpen.get(cell.name) ?? true;
+          details.addEventListener('toggle', () => codeOpen.set(cell.name, details.open));
+          details.append(node('summary', '', 'Код Rust'));
+          const editor = node('textarea');
+          editor.value = drafts.get(cell.name) ?? source.source;
+          editor.dataset.cell = cell.name;
+          editor.spellcheck = false;
+          editor.style.height = `${Math.min(330, Math.max(120, editor.value.split('\n').length * 20 + 25))}px`;
+          editor.addEventListener('input', () => drafts.set(cell.name, editor.value));
+          editor.addEventListener('keydown', event => {
+            if ((event.ctrlKey || event.metaKey || event.shiftKey) && event.key === 'Enter') {
+              event.preventDefault();
+              saveCell(cell.name);
+            }
           });
-          card.append(label, slider);
-        } else if (cell.view.kind === 'text') {
-          const view = document.createElement('div');
-          view.className = 'view';
-          view.textContent = cell.view.value;
-          card.append(view);
+          details.append(editor);
+          const sourceActions = node('div', 'source-actions');
+          const save = node('button', '', 'Зберегти / виконати');
+          save.type = 'button';
+          save.addEventListener('click', () => saveCell(cell.name));
+          sourceActions.append(save, node('span', 'hint', 'Ctrl/Shift+Enter'));
+          details.append(sourceActions);
+          card.append(details);
         }
-
-        if (cell.error) {
-          const error = document.createElement('div');
-          error.className = 'error';
-          error.textContent = cell.error.message;
-          card.append(error);
-        }
-        cells.append(card);
+        const output = node('div', 'output');
+        output.append(node('span', 'output-label', 'Результат'));
+        const view = cell.view || { kind: 'empty' };
+        if (view.kind === 'text') output.append(node('div', 'output-text', view.value));
+        else if (view.kind === 'markdown') output.append(markdownView(view.value));
+        else if (view.kind === 'widget') output.append(widgetView(view.value));
+        else output.append(node('div', 'output-empty', 'Немає відображеного результату'));
+        card.append(output);
+        if (cell.error) card.append(node('p', 'cell-error', cell.error.message));
+        card.append(node('div', 'cell-meta', `${cell.status} · ${cell.run_count} запусків · ${cell.execution_time_us} µs`));
+        cellsElement.append(card);
       }
+      renderGraph(state);
+      restoreFocus(focus);
     }
 
-    function showBuildStatus(status, errors) {
-      sourceStatus.textContent = status === 'current' ? 'Збірка актуальна' : status === 'building' ? 'Збираю…' : 'Код збережено; попередня збірка ще працює';
-      diagnostics.textContent = errors.map(error => `${error.file || 'Cargo'}${error.line ? ':' + error.line : ''}: ${error.message}`).join('\n');
-    }
-
-    async function saveCode() {
-      if (baseSource === null) return;
-      saveSource.disabled = true;
-      showBuildStatus('building', []);
-      try {
-        await requestQueue;
-        const response = await fetch('/api/source', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ source: sourceCode.value, base_source: baseSource })
+    function widgetView(widget) {
+      const wrapper = node('div', 'widget');
+      const label = widget.label || widget.name;
+      if (widget.kind === 'slider') {
+        const title = node('label', '', `${label}: ${widget.value}`);
+        const input = node('input');
+        input.type = 'range'; input.min = widget.min; input.max = widget.max;
+        input.step = widget.step || 1; input.value = widget.value; input.dataset.signal = widget.name;
+        input.addEventListener('input', () => {
+          title.textContent = `${label}: ${input.value}`;
+          scheduleSignal(widget.name, Number(input.value), 60);
         });
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.message || 'Не вдалося зберегти код');
-        baseSource = result.source;
-        requestVersion++;
-        message.textContent = '';
-        showBuildStatus(result.source_status, result.diagnostics || []);
-        render(result.state);
-      } catch (error) {
-        message.textContent = error.message;
-        showBuildStatus('stale', []);
-      } finally {
-        saveSource.disabled = false;
+        wrapper.append(title, input);
+      } else if (widget.kind === 'text') {
+        const title = node('label', '', label);
+        const input = node('input');
+        input.type = 'text'; input.value = widget.value; input.dataset.signal = widget.name;
+        input.addEventListener('input', () => scheduleSignal(widget.name, input.value, 300));
+        wrapper.append(title, input);
+      } else if (widget.kind === 'checkbox') {
+        const row = node('label', 'check');
+        const input = node('input');
+        input.type = 'checkbox'; input.checked = widget.value; input.dataset.signal = widget.name;
+        input.addEventListener('change', () => scheduleSignal(widget.name, input.checked, 0));
+        row.append(input, document.createTextNode(label));
+        wrapper.append(row);
+      }
+      return wrapper;
+    }
+
+    function renderGraph(state) {
+      graphList.replaceChildren();
+      for (const name of state.topo_order || []) {
+        const source = sourceCells.find(cell => cell.name === name);
+        const item = node('li');
+        const button = node('button', '', name);
+        button.type = 'button';
+        button.addEventListener('click', () => document.getElementById(`cell-${name}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+        item.append(button, node('small', '', source?.refs.length ? source.refs.join(' ← ') : 'без залежностей'));
+        graphList.append(item);
       }
     }
 
-    saveSource.addEventListener('click', saveCode);
+    function scheduleSignal(name, value, delay) {
+      clearTimeout(signalTimers.get(name));
+      signalTimers.set(name, setTimeout(() => updateSignal(name, value), delay));
+    }
 
     function updateSignal(name, value) {
       const version = ++requestVersion;
       requestQueue = requestQueue.then(async () => {
         try {
-          const response = await fetch('/api/signal', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, value })
-          });
-          const result = await response.json();
-          if (!response.ok) throw new Error(result.message);
-          if (version === requestVersion) {
-            message.textContent = '';
-            render(result);
-          }
+          const result = await post('/api/signal', { name, value });
+          if (version === requestVersion) { message.textContent = ''; render(result); }
         } catch (error) {
           if (version === requestVersion) message.textContent = error.message;
         }
       });
     }
 
-    fetch('/api/state')
-      .then(response => response.json())
-      .then(render)
-      .catch(error => { message.textContent = error.message; });
+    async function post(path, body) {
+      const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      let result;
+      try { result = await response.json(); } catch { throw new Error('Сервер не повернув JSON-відповідь'); }
+      if (!response.ok) throw new Error(result.message || 'Запит не виконано');
+      return result;
+    }
 
-    fetch('/api/source')
-      .then(async response => response.ok ? response.json() : null)
-      .then(result => {
-        if (!result) return;
+    async function runCell(name) {
+      try {
+        await requestQueue;
+        const result = await post('/api/run', { name });
+        message.textContent = '';
+        render(result);
+      } catch (error) { message.textContent = error.message; }
+    }
+
+    async function saveCell(name) {
+      if (baseSource === null) return;
+      const source = sourceCells.find(cell => cell.name === name);
+      if (!source) return;
+      const code = drafts.get(name) ?? source.source;
+      if (code === source.source) return runCell(name);
+      document.getElementById('run-all').disabled = true;
+      document.getElementById('build-status').textContent = 'Збираю ноутбук…';
+      try {
+        await requestQueue;
+        const result = await post('/api/cell', { name, source: code, base_source: baseSource });
         baseSource = result.source;
-        sourceCode.value = result.source;
-        sourcePanel.hidden = false;
-        if (result.source_status === 'stale' && result.diagnostics?.length) sourcePanel.open = true;
-        showBuildStatus(result.source_status, result.diagnostics || []);
-      })
-      .catch(error => { message.textContent = error.message; });
+        sourceCells = result.cells;
+        drafts.delete(name);
+        if (!fileDraft) fileSource.value = baseSource;
+        requestVersion++;
+        render(result.state);
+        if (result.state.source_status === 'current') message.textContent = '';
+        if (!sourceCells.length) filePanel.open = true;
+      } catch (error) { message.textContent = error.message; }
+      finally { document.getElementById('run-all').disabled = false; }
+    }
+
+    async function saveFile() {
+      if (baseSource === null) return;
+      const button = document.getElementById('save-file');
+      button.disabled = true;
+      try {
+        await requestQueue;
+        const result = await post('/api/source', { source: fileSource.value, base_source: baseSource });
+        baseSource = result.source;
+        sourceCells = result.cells;
+        drafts.clear();
+        fileDraft = false;
+        requestVersion++;
+        render(result.state);
+        if (result.state.source_status === 'current') message.textContent = '';
+      } catch (error) { message.textContent = error.message; }
+      finally { button.disabled = false; }
+    }
+
+    document.getElementById('run-all').addEventListener('click', () => runCell(null));
+    document.getElementById('save-file').addEventListener('click', saveFile);
+    document.getElementById('graph-button').addEventListener('click', () => graphElement.classList.toggle('open'));
+    document.getElementById('mode-button').addEventListener('click', event => {
+      const appMode = document.body.classList.toggle('app-mode');
+      event.currentTarget.textContent = appMode ? 'Режим ноутбука' : 'Режим застосунку';
+    });
+    fileSource.addEventListener('input', () => { fileDraft = true; });
+
+    Promise.all([
+      fetch('/api/source').then(response => response.ok ? response.json() : null),
+      fetch('/api/state').then(response => response.json())
+    ]).then(([source, state]) => {
+      if (source) {
+        baseSource = source.source;
+        sourceCells = source.cells || [];
+        fileSource.value = source.source;
+        filePanel.hidden = false;
+        document.getElementById('file-name').textContent = source.filename || 'ноутбук.rs';
+      }
+      render(state);
+    }).catch(error => { message.textContent = error.message; });
   </script>
 </body>
 </html>

@@ -3,6 +3,7 @@ mod editor;
 mod graph;
 mod runtime;
 mod server;
+mod source;
 mod state;
 mod ui;
 
@@ -16,5 +17,6 @@ pub use rustimo_macros::{cell, notebook};
 #[doc(hidden)]
 pub use serde_json;
 pub use server::serve;
+pub use source::SourceCell;
 pub use state::StateVault;
 pub use ui::Ui;

@@ -17,6 +17,11 @@ struct SignalRequest {
     value: serde_json::Value,
 }
 
+#[derive(Deserialize)]
+struct RunRequest {
+    name: Option<String>,
+}
+
 pub(crate) struct Request {
     pub(crate) method: String,
     pub(crate) path: String,
@@ -118,6 +123,41 @@ fn handle_route(
             };
             let mut notebook = notebook.lock().unwrap_or_else(|e| e.into_inner());
             match notebook.set_signal(&request.name, request.value) {
+                Ok(_) => {
+                    let json =
+                        serde_json::to_vec(&notebook.snapshot()).map_err(io::Error::other)?;
+                    send_response(stream, "200 OK", "application/json", &json)
+                }
+                Err(error) => {
+                    let json = serde_json::to_vec(&error).map_err(io::Error::other)?;
+                    send_response(
+                        stream,
+                        "422 Unprocessable Entity",
+                        "application/json",
+                        &json,
+                    )
+                }
+            }
+        }
+        ("POST", "/api/run") => {
+            let request: RunRequest = match serde_json::from_slice(body) {
+                Ok(request) => request,
+                Err(error) => {
+                    return send_response(
+                        stream,
+                        "400 Bad Request",
+                        "text/plain",
+                        error.to_string().as_bytes(),
+                    );
+                }
+            };
+            let mut notebook = notebook.lock().unwrap_or_else(|e| e.into_inner());
+            let result = if let Some(name) = request.name {
+                notebook.run_from(&name)
+            } else {
+                notebook.run_all()
+            };
+            match result {
                 Ok(_) => {
                     let json =
                         serde_json::to_vec(&notebook.snapshot()).map_err(io::Error::other)?;
